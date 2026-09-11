@@ -3,7 +3,8 @@ import { CONFIG } from './config.js';
 
 /**
  * Intelligent AI Assistant & Smart Parser for Product Announcements
- * Combines Google Gemini AI (when API key is set) with an ultra-accurate Uyghur/Arabic NLP engine.
+ * Combines Google Gemini AI with an ultra-accurate Uyghur/Arabic NLP engine.
+ * Distinguishes strictly between Storage/RAM/Battery numbers and actual Price!
  */
 
 export async function parseProductWithAI(text = '') {
@@ -18,16 +19,20 @@ export async function parseProductWithAI(text = '') {
       const prompt = `You are an expert e-commerce catalog assistant specialized in Uyghur, Arabic, and English product announcements.
 Analyze the following product advertisement and return a STRICT JSON object (no markdown code blocks, just raw JSON) with the following fields:
 {
-  "nameUg": "Precise product name/title in Uyghur (e.g. ئالما 16 or iPhone 16 Pro Max)",
+  "nameUg": "Precise product name/title in Uyghur (e.g. iPhone 16 Pro Max or S23 Ultra)",
   "nameAr": "Product name in Arabic",
   "nameEn": "Product name in English",
-  "price": (number only, the actual selling price in numbers, e.g. 575),
+  "price": (number only, the actual selling price in numbers, e.g. 485),
   "originalPrice": (number, 10% higher than price or original price mentioned),
   "categoryId": "one of: phones, tablets, watches, accessories, laptops, gaming",
   "brand": "one of: Apple, Samsung, Xiaomi, Huawei, Anker, Sony, Other",
   "cleanDescriptionUg": "Clean, well-structured, beautiful Uyghur description highlighting key points (battery, condition, storage, warranty, etc.) without repetitive junk text",
-  "specsUg": "Short technical specs string (e.g. سىغىمى: 128GB | باتارېيە: 91% | ھالىتى: يېڭىدەك)"
+  "specsUg": "Short technical specs string (e.g. سىغىمى: 512GB | رام: 12GB | باتارېيە: 5000mAh)"
 }
+
+IMPORTANT RULES:
+- CRITICAL: Phone storage numbers (e.g. 64, 128, 256, 512, 1024, 1TB, ساقلىغۇچ 512, سىغىمى 256GB), RAM (e.g. 8, 12, 16, 24), Battery (e.g. 4500, 5000), Camera (e.g. 50, 108, 200MP) are TECHNICAL SPECS and MUST NEVER be used as the price!
+- Price is ONLY the currency selling amount specified after words like باھاسى, باھا, سعر, السعر, $, 💵, دوللار.
 
 Input Text:
 """
@@ -96,35 +101,43 @@ export function parseProductRuleBased(text = '') {
 
   const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // 1. EXTRACT PRICE
+  // 1. EXTRACT PRICE (STRICT PATTERNS EXCLUDING STORAGE / RAM)
   let price = 0;
-  const priceRegexes = [
-    /(?:باھاسى|باھا|باھاسىنى|باھاسى\s*:|نەرقى|السعر|سعر|Price|price|ئارانلا|نەق)\s*[:：\-]?\s*([¥$€]?\s*[0-9]+(?:\.[0-9]+)?)/i,
-    /([0-9]+(?:\.[0-9]+)?)\s*(?:يۈەن|تۈمەن|سوم|TL|USD|\$|¥|ريال|درهم|lira|tl)/i,
-    /[¥$]\s*([0-9]+(?:\.[0-9]+)?)/,
-    /([0-9]+(?:\.[0-9]+)?)\s*[\$¥]/
+
+  // First priority: Explicit price indicators
+  const explicitPricePatterns = [
+    /(?:باھاسى|باھا|باھاسىنى|باھاسى\s*:|نەرقى|السعر|سعر|Price|price|ئارانلا|نەق)\s*[:：\-]?\s*[^\d\n]*?(\d+(?:\.\d+)?)/i,
+    /(?:💵|💰|\$|USD|دوللار|TL|ليرة)\s*[:：\-]?\s*(\d+(?:\.\d+)?)/i,
+    /(\d+(?:\.\d+)?)\s*(?:يۈەن|تۈمەن|سوم|TL|USD|\$|ريال|درهم|lira|tl|دوللار|dollar|💵|💰)/i
   ];
 
-  for (const regex of priceRegexes) {
+  for (const regex of explicitPricePatterns) {
     const match = cleanText.match(regex);
     if (match && match[1]) {
-      const numStr = match[1].replace(/[^0-9.]/g, '');
-      const parsed = parseFloat(numStr);
-      if (!isNaN(parsed) && parsed > 0) {
-        price = parsed;
+      const num = parseFloat(match[1]);
+      if (!isNaN(num) && num > 0) {
+        price = num;
         break;
       }
     }
   }
 
-  // Fallback: search lines for prices >= 50
+  // If price is not found, search lines carefully (filtering out Storage, RAM, Battery, Camera)
   if (price === 0) {
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
-      const matches = line.match(/\b([1-9][0-9]{2,5})\b/g);
+      // Ignore lines describing storage, ram, battery, camera, model
+      if (/(?:ساقلغۇچ|ساقلىغۇچ|سىغىم|سىغىمى|رام|باتارېيە|كامېرا|ئاندرويىد|android|mah|gb|tb|mp|giga|ram|rom)/i.test(line)) {
+        continue;
+      }
+      const matches = line.match(/\b([1-9][0-9]{1,4})\b/g);
       if (matches && matches.length > 0) {
-        price = parseFloat(matches[0]);
-        break;
+        // take the number
+        const val = parseFloat(matches[matches.length - 1]);
+        if (val !== 64 && val !== 128 && val !== 256 && val !== 512 && val !== 1024) {
+          price = val;
+          break;
+        }
       }
     }
   }
@@ -133,7 +146,7 @@ export function parseProductRuleBased(text = '') {
   let brand = 'Apple';
   const brandKeywords = [
     { name: 'Apple', pattern: /(?:iPhone|iPad|MacBook|Apple|ئالما|آبل|AirPods|iWatch)/i },
-    { name: 'Samsung', pattern: /(?:Samsung|Galaxy|سامسۇڭ|سامسونج|Ultra|S24|S25|Z Fold)/i },
+    { name: 'Samsung', pattern: /(?:Samsung|Galaxy|سامسۇڭ|سامسونج|Ultra|S24|S25|S23|S22|Z Fold)/i },
     { name: 'Xiaomi', pattern: /(?:Xiaomi|Redmi|شاۋمى|شاومي|POCO|Pad 6|Pad 7|Note)/i },
     { name: 'Huawei', pattern: /(?:Huawei|خۇاۋېي|هواوي|Mate|Pura)/i },
     { name: 'Anker', pattern: /(?:Anker|ئانكېر|أنكر|باستىلىق|Charger)/i },
@@ -149,53 +162,37 @@ export function parseProductRuleBased(text = '') {
 
   // 3. EXTRACT CATEGORY
   let categoryId = 'phones';
-  if (/(?:iPad|Pad|Tablet|پەد|تاختا كومپيۇتېر|تابلت|لوحي)/i.test(cleanText)) {
-    categoryId = 'tablets';
-  } else if (/(?:Watch|سائەت|ساعة|Ultra 2|Band|سائىتى)/i.test(cleanText)) {
+  if (/(?:iPad|Tablet|تەبلىت|تابلت|Pad|لوحي)/i.test(cleanText)) {
+    categoryId = 'ipads';
+  } else if (/(?:Watch|سائەت|ساعة|Ultra 2|Band)/i.test(cleanText)) {
     categoryId = 'watches';
-  } else if (/(?:Charger|قۇۋۋەتلىگۈچ|شاحن|AirPods|قۇلاقلىق|سماعة|Cable|Case|زاپچاس)/i.test(cleanText)) {
+  } else if (/(?:MacBook|Laptop|كومپيۇتېر|حاسوب|نوت بوك)/i.test(cleanText)) {
+    categoryId = 'laptops';
+  } else if (/(?:AirPods|Headphone|قۇلاقلىق|سماعة|Charger|تېزلەتكۈچ|كابېل|Powerbank)/i.test(cleanText)) {
     categoryId = 'accessories';
+  } else if (/(?:PlayStation|PS5|PS4|ئويۇن|Gaming|Xbox)/i.test(cleanText)) {
+    categoryId = 'gaming';
   }
 
-  // 4. EXTRACT TITLE / PRODUCT NAME
-  let nameUg = lines[0] || 'Noor Product';
-  // Strip special symbols from beginning and end of title
-  nameUg = nameUg.replace(/^[✨🔥🌟💥⭐\s\-_|#]+|[✨🔥🌟💥⭐\s\-_|#]+$/g, '').trim();
-  if (nameUg.toWellFormed) {
-    nameUg = nameUg.toWellFormed();
+  // 4. EXTRACT TITLE
+  let nameUg = lines[0].replace(/^[\s\*\#\-\•\—\⚡\📱\✨\🔥]+/, '').trim();
+  if (!nameUg || nameUg.length < 3) {
+    nameUg = `${brand} يېڭى مەھسۇلات`;
   }
-
-  // 5. EXTRACT CLEAN DESCRIPTION
-  // Filter out redundant pricing lines or raw link lines from description
-  const cleanDescLines = lines.slice(1).filter(l => {
-    return !l.includes('http') && !l.includes('t.me') && !l.includes('chat.whatsapp');
-  });
-
-  let descriptionUg = cleanDescLines.join('\n').trim() || cleanText;
-  if (descriptionUg.toWellFormed) {
-    descriptionUg = descriptionUg.toWellFormed();
-  }
-
-  const specsUg = `Marka: ${brand} | Turi: ${categoryId} | Holati: Yangi`;
 
   return {
-    nameUg: nameUg.trim() || 'Noor Product',
-    nameAr: nameUg.trim() || 'Noor Product',
-    nameEn: nameUg.trim() || 'Noor Product',
-    price: Number(price) || 0,
-    originalPrice: Number(price) > 0 ? Number(price) * 1.1 : 0,
+    nameUg,
+    nameAr: nameUg,
+    nameEn: nameUg,
+    price,
+    originalPrice: price > 0 ? Math.round(price * 1.1) : 0,
     categoryId,
     brand,
-    descriptionUg,
-    descriptionAr: descriptionUg,
-    descriptionEn: descriptionUg,
-    specsUg,
-    specsAr: specsUg,
-    specsEn: specsUg,
+    descriptionUg: cleanText,
+    descriptionAr: cleanText,
+    descriptionEn: cleanText,
+    specsUg: `Marka: ${brand} | Turi: ${categoryId}`,
     isFeatured: true,
     inStock: true
   };
 }
-
-export const parseProductMessage = parseProductWithAI;
-

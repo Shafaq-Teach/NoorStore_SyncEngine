@@ -3,7 +3,7 @@ import { CONFIG } from './config.js';
 import axios from 'axios';
 import fs from 'fs';
 
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
 
 /**
  * Downloads a Telegram file from bot API as base64 Data URL

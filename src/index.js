@@ -11,7 +11,8 @@ import {
   pushCloudSyncState, 
   fetchCloudCommands,
   getLocalProducts,
-  saveLocalProducts
+  saveLocalProducts,
+  supabase
 } from './supabaseSync.js';
 import { 
   initWhatsAppClient, 
@@ -369,7 +370,46 @@ async function syncWithCloudState() {
   }
 }
 
+let lastKnownMaxProductId = 0;
+
+async function checkAndBroadcastNewSupabaseProducts() {
+  try {
+    const { data } = await supabase.from('products').select('*').order('id', { ascending: false }).limit(5);
+    if (!data || data.length === 0) return;
+    
+    const currentMax = Math.max(...data.map(p => Number(p.id) || 0));
+    if (lastKnownMaxProductId === 0) {
+      lastKnownMaxProductId = currentMax;
+      return;
+    }
+
+    if (currentMax > lastKnownMaxProductId) {
+      const newItems = data.filter(p => Number(p.id) > lastKnownMaxProductId);
+      lastKnownMaxProductId = currentMax;
+      
+      for (const item of newItems) {
+        console.log(`[Auto WhatsApp] 🚀 Broadcasting new product #${item.id} to WhatsApp: "${item.name_ug}" ($${item.price})`);
+        let photoBuffer = null;
+        if (item.image_res_name && item.image_res_name.startsWith('http')) {
+          try {
+            const resp = await axios.get(item.image_res_name, { responseType: 'arraybuffer' });
+            photoBuffer = Buffer.from(resp.data);
+          } catch(e) {}
+        }
+        await sendProductToWhatsApp({
+          nameUg: item.name_ug,
+          price: item.price,
+          descriptionUg: item.description_ug
+        }, photoBuffer);
+      }
+    }
+  } catch (err) {
+    // silent
+  }
+}
+
 setInterval(syncWithCloudState, 3000);
+setInterval(checkAndBroadcastNewSupabaseProducts, 4000);
 
 // ==========================================
 // 3. WEB CONTROL DASHBOARD & REST API
