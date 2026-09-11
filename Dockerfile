@@ -1,26 +1,21 @@
 FROM node:20-slim
 
+# Set up non-root user (compatible with Hugging Face, Railway, Render, etc.)
+RUN useradd -m -u 1000 user
 WORKDIR /app
 
-# Copy package files first for better Docker cache
+# Copy dependency files
 COPY package.json package-lock.json ./
-
-# Install production dependencies only
 RUN npm ci --omit=dev
 
-# Copy source code
-COPY src/ ./src/
-COPY target_group.json ./
+# Copy all source files
+COPY --chown=user:user . .
 
-# Create empty products_db if needed
-RUN echo "[]" > products_db.json
+# Grant permissions to user
+RUN chown -R user:user /app
 
-# Expose the port
-EXPOSE 3000
+USER user
+ENV PORT=7860
+EXPOSE 7860 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
-
-# Start the sync engine
 CMD ["node", "src/index.js"]
