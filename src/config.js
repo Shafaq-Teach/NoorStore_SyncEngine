@@ -12,8 +12,8 @@ export const CONFIG = {
   TELEGRAM_CHANNEL_ID: process.env.TELEGRAM_CHANNEL_ID || '',
 
   // Supabase Configuration
-  SUPABASE_URL: process.env.SUPABASE_URL || 'https://ufkblidmcscbgardibkm.supabase.co',
-  SUPABASE_KEY: process.env.SUPABASE_KEY || 'sb_publishable_9LBjrGb7H2D4LKpN8s4gvQ_SknfuLEH',
+  SUPABASE_URL: process.env.SUPABASE_URL || 'https://xmlesmevinugetrqtznh.supabase.co',
+  SUPABASE_KEY: process.env.SUPABASE_KEY || 'sb_publishable_aXtsifwgdWh_n9kBkvb-pQ_zC2htb3E',
 
   // Target WhatsApp Group Name (e.g. "Noor Store خېرىدارلار گۇرۇپپىسى")
   WHATSAPP_GROUP_NAME: process.env.WHATSAPP_GROUP_NAME || '',
@@ -24,6 +24,6 @@ export const CONFIG = {
   // Web Dashboard Port
   PORT: process.env.PORT || 3000,
 
-  // Online Store Public URL (Cloudflare Worker/Pages Domain)
-  STORE_URL: process.env.STORE_URL || 'https://noor-store.yulgun353.workers.dev/'
+  // Online Store Public URL
+  STORE_URL: process.env.STORE_URL || 'https://shafaq-teach.github.io/Noor_Store/'
 };
