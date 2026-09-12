@@ -1,4 +1,9 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import makeWASocket, { 
+  useMultiFileAuthState, 
+  DisconnectReason, 
+  prepareWAMessageMedia, 
+  generateWAMessageFromContent 
+} from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'fs';
@@ -242,24 +247,42 @@ https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
 
     const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
 
-    if (buffers.length > 0) {
-      for (let i = 0; i < buffers.length; i++) {
-        const buf = buffers[i];
-        if (i > 0) {
-          // 2 second pause between photos to prevent WhatsApp anti-spam flagging
-          await new Promise(r => setTimeout(r, 2000));
-        }
-        if (i === 0) {
-          await whatsappSocket.sendMessage(targetJid, {
-            image: buf,
-            caption
+    if (buffers.length > 1) {
+      // Multi-photo Album:
+      // Pre-upload all photos in parallel and relay stanzas with 0 delay so WhatsApp
+      // groups them into an album collage side-by-side with text underneath.
+      try {
+        const mediaUploads = await Promise.all(
+          buffers.map(buf => prepareWAMessageMedia({ image: buf }, { upload: whatsappSocket.waUploadToServer }))
+        );
+
+        for (let i = 0; i < mediaUploads.length; i++) {
+          const content = mediaUploads[i];
+          if (i === 0) {
+            content.imageMessage.caption = caption;
+          }
+          const msg = generateWAMessageFromContent(targetJid, content, {
+            userJid: whatsappSocket.user?.id
           });
-        } else {
+          await whatsappSocket.relayMessage(targetJid, msg.message, {
+            messageId: msg.key.id
+          });
+        }
+      } catch (albumErr) {
+        console.warn('[WhatsApp] Pre-upload album fallback:', albumErr.message);
+        // Fallback: send sequentially with 0 delay
+        for (let i = 0; i < buffers.length; i++) {
           await whatsappSocket.sendMessage(targetJid, {
-            image: buf
+            image: buffers[i],
+            ...(i === 0 ? { caption } : {})
           });
         }
       }
+    } else if (buffers.length === 1) {
+      await whatsappSocket.sendMessage(targetJid, {
+        image: buffers[0],
+        caption
+      });
     } else {
       await whatsappSocket.sendMessage(targetJid, {
         text: caption
