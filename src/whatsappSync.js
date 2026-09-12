@@ -327,16 +327,13 @@ https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
     const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
 
     if (buffers.length > 1) {
-      // Send all photos individually, with caption attached ONLY to the LAST photo:
-      // This ensures all 2 or 3 photos appear on top, and the text description comes directly UNDERNEATH all photos!
-      for (let i = 0; i < buffers.length; i++) {
-        const isLast = (i === buffers.length - 1);
-        await whatsappSocket.sendMessage(targetJid, {
-          image: buffers[i],
-          ...(isLast ? { caption } : {})
-        });
-      }
-      console.log(`[WhatsApp] ✅ Broadcasted ${buffers.length} photos individually with text underneath to "${groupName}"!`);
+      // User explicitly requested: stitch photos side-by-side into a single image collage (جۈپلەپ يانمۇ-يان بىر رەسىم)!
+      const collageBuffer = await createPhotoCollage(buffers);
+      await whatsappSocket.sendMessage(targetJid, {
+        image: collageBuffer || buffers[0],
+        caption
+      });
+      console.log(`[WhatsApp] ✅ Broadcasted side-by-side photo collage (${buffers.length} photos) with text underneath to "${groupName}"!`);
     } else if (buffers.length === 1) {
       await whatsappSocket.sendMessage(targetJid, {
         image: buffers[0],
