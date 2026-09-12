@@ -310,14 +310,16 @@ https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
     const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
 
     if (buffers.length > 1) {
-      // Option A: Stitch multi-photo album side-by-side into a single high-resolution collage
-      // so in WhatsApp all photos appear on the exact same plane with the text underneath!
-      const collageBuffer = await createPhotoCollage(buffers);
-      await whatsappSocket.sendMessage(targetJid, {
-        image: collageBuffer,
-        caption
-      });
-      console.log(`[WhatsApp] ✅ Broadcasted side-by-side collage (${buffers.length} photos) with caption to "${groupName}"!`);
+      // Send all photos individually, with caption attached ONLY to the LAST photo:
+      // This ensures all 2 or 3 photos appear on top, and the text description comes directly UNDERNEATH all photos!
+      for (let i = 0; i < buffers.length; i++) {
+        const isLast = (i === buffers.length - 1);
+        await whatsappSocket.sendMessage(targetJid, {
+          image: buffers[i],
+          ...(isLast ? { caption } : {})
+        });
+      }
+      console.log(`[WhatsApp] ✅ Broadcasted ${buffers.length} photos individually with text underneath to "${groupName}"!`);
     } else if (buffers.length === 1) {
       await whatsappSocket.sendMessage(targetJid, {
         image: buffers[0],
