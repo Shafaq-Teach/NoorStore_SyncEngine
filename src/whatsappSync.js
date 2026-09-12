@@ -291,12 +291,12 @@ export async function sendProductToWhatsApp(productData, photoBuffers = []) {
     const targetJid = targetGroup.id;
     const groupName = targetGroup.subject || 'WhatsApp Group';
     const currencySymbol = '$';
-    const caption = 
-`✨ *${productData.nameUg || 'يېڭى مەھسۇلات'}* ✨
-━━━━━━━━━━━━━━━━━
-💰 *باھاسى:* ${currencySymbol}${productData.price}
-📝 *چۈشەندۈرۈش:*
-${productData.descriptionUg || 'ئەلا سۈپەتلىك، كاپالەتلىك مەھسۇلات.'}
+    const rawDesc = (productData.descriptionUg || '').trim();
+    let caption = '';
+
+    if (rawDesc && (rawDesc.includes('باھاسى') || rawDesc.length > 50)) {
+      caption = `${rawDesc}
+
 ━━━━━━━━━━━━━━━━━
 🌐 *تور دۇكىنى:*
 https://noor-store.yulgun353.workers.dev/
@@ -306,6 +306,23 @@ https://t.me/NoorStore2
 
 💬 *ۋاتساپ گۇرۇپپىسى:*
 https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
+    } else {
+      caption = 
+`✨ *${productData.nameUg || 'يېڭى مەھسۇلات'}* ✨
+━━━━━━━━━━━━━━━━━
+💰 *باھاسى:* ${currencySymbol}${productData.price}
+📝 *چۈشەندۈرۈش:*
+${rawDesc || 'ئەلا سۈپەتلىك، كاپالەتلىك مەھسۇلات.'}
+━━━━━━━━━━━━━━━━━
+🌐 *تور دۇكىنى:*
+https://noor-store.yulgun353.workers.dev/
+
+✈️ *تېلېگرام قانىلى:*
+https://t.me/NoorStore2
+
+💬 *ۋاتساپ گۇرۇپپىسى:*
+https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
+    }
 
     const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
 
