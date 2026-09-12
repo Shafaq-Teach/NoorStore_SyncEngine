@@ -193,7 +193,7 @@ export async function refreshWhatsAppGroups() {
 /**
  * Broadcasts a product announcement to the configured WhatsApp group
  */
-export async function sendProductToWhatsApp(productData, photoBuffer) {
+export async function sendProductToWhatsApp(productData, photoBuffers = []) {
   if (!whatsappSocket || whatsappStatus !== 'CONNECTED') {
     console.log('[WhatsApp] Not connected, skipping WhatsApp broadcast.');
     return { success: false, message: 'WhatsApp not connected', groupName: 'ئۇلانمىغان' };
@@ -240,18 +240,33 @@ https://t.me/NoorStore2
 💬 *ۋاتساپ گۇرۇپپىسى:*
 https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
 
-    if (photoBuffer && Buffer.isBuffer(photoBuffer) && photoBuffer.length > 0) {
-      await whatsappSocket.sendMessage(targetJid, {
-        image: photoBuffer,
-        caption
-      });
+    const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
+
+    if (buffers.length > 0) {
+      for (let i = 0; i < buffers.length; i++) {
+        const buf = buffers[i];
+        if (i > 0) {
+          // 2 second pause between photos to prevent WhatsApp anti-spam flagging
+          await new Promise(r => setTimeout(r, 2000));
+        }
+        if (i === 0) {
+          await whatsappSocket.sendMessage(targetJid, {
+            image: buf,
+            caption
+          });
+        } else {
+          await whatsappSocket.sendMessage(targetJid, {
+            image: buf
+          });
+        }
+      }
     } else {
       await whatsappSocket.sendMessage(targetJid, {
         text: caption
       });
     }
 
-    console.log(`[WhatsApp] ✅ Broadcasted to WhatsApp group: "${groupName}" (${targetJid})!`);
+    console.log(`[WhatsApp] ✅ Broadcasted ${buffers.length} photos to WhatsApp group: "${groupName}" (${targetJid})!`);
     return { success: true, groupName, groupId: targetJid };
   } catch (err) {
     console.error('[WhatsApp] Broadcast error:', err.message);

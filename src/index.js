@@ -104,221 +104,18 @@ async function startTelegramBot(token) {
   try {
     telegramBot = new Bot(token);
 
-    // Bot Error Catching to prevent polling drops
+    // Bot Error Catching
     telegramBot.catch((err) => {
       console.error('[Bot Engine Error]:', err.message);
     });
 
-    // 0. Start & Help Commands
-    telegramBot.command('start', async (ctx) => {
-      await ctx.reply(
-        `👋 *ئەسسالامۇ ئەلەيكۇم! Noor Store سۈنئىي ئىدراك ۋە ئاپتوماتىك ماس قەدەملەش سىستېمىسىغا خۇش كەپسىز!*\n\n` +
-        `🤖 *بۇ بوت نېمە ئىش قىلىدۇ؟*\n` +
-        `ماڭا بىرەر مەھسۇلاتنىڭ رەسىمى ۋە باھاسىنى تاشلىسىڭىزلا، سۈنئىي ئەقىل ئارقىلىق ئاپتوماتىك تەھلىل قىلىپ:\n\n` +
-        `1. 🌐 [Noor Store تور دۇكىنى](https://noor-store.yulgun353.workers.dev/) غا دەرھال قوشىدۇ\n` +
-        `2. 📱 بارلىق يانفون ئەپلىرىگە يەتكۈزىدۇ\n` +
-        `3. ✈️ [@NoorStore2](https://t.me/NoorStore2) تېلېگرام قانىلىغا يوللايدۇ\n` +
-        `4. 💬 WhatsApp ئېلان گۇرۇپپىسىغا ماس قەدەمدە تارقىتىدۇ!\n\n` +
-        `💡 *سىناپ بېقىش ئۈچۈن:* مەھسۇلات رەسىمى بىلەن باھاسىنى ئەۋەتىپ بېقىڭ!`,
-        { parse_mode: 'Markdown' }
-      ).catch(() => {});
-    });
-
-    telegramBot.command('help', async (ctx) => {
-      await ctx.reply(
-        `📖 *ئىشلىتىش قوللانمىسى:*\n\n` +
-        `تۆۋەندىكىدەك ھەرقانداق قېلىپتا ئۇچۇر ياكى رەسىم ئەۋەتسىڭىزلا بولىدۇ:\n\n` +
-        `*iPhone 16 Pro Max (512GB)*\n` +
-        `*باھاسى:* $1250\n` +
-        `*ھالىتى:* پۈتۈنلەي يېڭى، كاپالەتلىك\n\n` +
-        `سۈنئىي ئىدراك بارلىق پارامېتىرلارنى ئاپتوماتىك ئايرىيدۇ.`,
-        { parse_mode: 'Markdown' }
-      ).catch(() => {});
-    });
-
-    // Handle incoming messages (Channel Posts & Group / Private Messages)
-    telegramBot.on(['channel_post', 'message'], async (ctx) => {
-      try {
-        const msg = ctx.channelPost || ctx.message;
-        if (!msg) return;
-
-        // Skip command messages (already handled)
-        const rawText = msg.caption || msg.text || '';
-        if (rawText.startsWith('/start') || rawText.startsWith('/help')) {
-          return;
-        }
-
-        // 1. Ignore automatic forwards (e.g. from linked channel to discussion group)
-        if (msg.is_automatic_forward) {
-          console.log('[Telegram] ⏩ Skipping automatic forward from linked channel.');
-          return;
-        }
-
-        // 2. Ignore messages sent by any bot or this bot itself
-        if (msg.from?.is_bot || msg.sender_chat?.username === 'NoorStore2') {
-          return;
-        }
-
-        // 3. Deduplicate media group / album items (process only first photo)
-        if (msg.media_group_id && isDuplicateMediaGroup(msg.media_group_id)) {
-          console.log(`[Telegram] ⏩ Skipping extra photo in media_group: ${msg.media_group_id}`);
-          return;
-        }
-
-        // 4. Deduplicate message ID
-        if (isDuplicateMessage(msg.chat?.id, msg.message_id)) {
-          console.log(`[Telegram] ⏩ Skipping already processed message ID: ${msg.message_id}`);
-          return;
-        }
-
-        const text = rawText;
-        const photos = msg.photo;
-
-        console.log(`\n[Telegram] 📥 Received message/post from chat ID ${msg.chat?.id} (${msg.chat?.type}): "${text.slice(0, 40)}..."`);
-
-        // If no text or photo, skip
-        if (!text && (!photos || photos.length === 0)) return;
-
-        // Send instant typing action and "Analyzing..." feedback for private chats
-        let processingMsg = null;
-        if (msg.chat?.type === 'private') {
-          ctx.api.sendChatAction(msg.chat.id, 'typing').catch(() => {});
-          processingMsg = await ctx.reply('⏳ *سۈنئىي ئىدراك مەھسۇلات ئۇچۇرىنى تەھلىل قىلىپ، بارلىق سۇپىلارغا ماس قەدەملەۋاتىدۇ...*', {
-            parse_mode: 'Markdown'
-          }).catch(() => null);
-        }
-
-        // 5. Parse product details from text (Intelligent AI Assistant)
-        const parsedProduct = await parseProductMessage(text);
-        console.log('[Parser] Extracted details:', {
-          name: parsedProduct.nameUg,
-          price: parsedProduct.price,
-          category: parsedProduct.categoryId,
-          brand: parsedProduct.brand
-        });
-
-        // 6. Check product debounce (in case multiple triggers fire at once)
-        if (isDuplicateProduct(parsedProduct.nameUg, parsedProduct.price)) {
-          console.log(`[Telegram] ⚠️ Skipping rapid duplicate product: "${parsedProduct.nameUg}" $${parsedProduct.price}`);
-          if (processingMsg) {
-            ctx.api.deleteMessage(msg.chat.id, processingMsg.message_id).catch(() => {});
-          }
-          return;
-        }
-
-        // 7. Download highest quality photo if attached (single fast network call)
-        let imageResName = '/images/img_phones_1786037591338.jpg';
-        let photoBuffer = null;
-        let highestPhotoId = null;
-
-        if (photos && photos.length > 0) {
-          const highestPhoto = photos[photos.length - 1];
-          highestPhotoId = highestPhoto.file_id;
-          try {
-            const fileInfo = await ctx.api.getFile(highestPhotoId);
-            if (fileInfo.file_path) {
-              const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`;
-              const photoResp = await axios.get(fileUrl, { responseType: 'arraybuffer', timeout: 15000 });
-              photoBuffer = Buffer.from(photoResp.data);
-              imageResName = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
-            }
-          } catch (dlErr) {
-            console.error('[Photo Download Error]:', dlErr.message);
-          }
-        }
-
-        // 8. Prepare Direct Buttons & Clean Caption
-        const directButtons = new InlineKeyboard()
-          .url("🌐 تور دۇكىنى", CONFIG.STORE_URL || "https://noor-store.yulgun353.workers.dev/")
-          .row()
-          .url("✈️ تېلېگرام", "https://t.me/NoorStore2")
-          .url("💬 ۋاتساپ", "https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4");
-
-        const currencySymbol = '$';
-
-        const channelCaption = 
-`✨ *${parsedProduct.nameUg}* ✨
-━━━━━━━━━━━━━━━━━
-💰 *باھاسى:* ${currencySymbol}${parsedProduct.price}
-📝 *چۈشەندۈرۈش:*
-${parsedProduct.descriptionUg || 'ئەلا سۈپەتلىك، كاپالەتلىك مەھسۇلات.'}
-━━━━━━━━━━━━━━━━━
-🌐 [تور دۇكىنى](https://noor-store.yulgun353.workers.dev/)
-✈️ [تېلېگرام](https://t.me/NoorStore2) | 💬 [ۋاتساپ](https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4)`;
-
-        // 9. Execute Supabase insert, Telegram broadcast, and WhatsApp broadcast in PARALLEL for INSTANT speed!
-        const dbPromise = insertProductToSupabase(parsedProduct, imageResName).catch(e => ({ success: false }));
-        
-        let tgChannelPromise = Promise.resolve();
-        if (msg.chat.type === 'private') {
-          const targetChannel = '@NoorStore2';
-          if (highestPhotoId) {
-            tgChannelPromise = ctx.api.sendPhoto(targetChannel, highestPhotoId, {
-              caption: channelCaption,
-              parse_mode: 'Markdown',
-              reply_markup: directButtons
-            }).catch(chanErr => console.log('[Telegram Channel Forward Notice]:', chanErr.message));
-          } else {
-            tgChannelPromise = ctx.api.sendMessage(targetChannel, channelCaption, {
-              parse_mode: 'Markdown',
-              reply_markup: directButtons
-            }).catch(chanErr => console.log('[Telegram Channel Forward Notice]:', chanErr.message));
-          }
-        }
-
-        const waPromise = sendProductToWhatsApp(parsedProduct, photoBuffer).catch(e => ({ success: false, groupName: 'خاتالىق' }));
-
-        let adminReplyPromise = Promise.resolve();
-        if (msg.chat.type === 'private') {
-          // Delete temporary processing status message
-          if (processingMsg) {
-            ctx.api.deleteMessage(msg.chat.id, processingMsg.message_id).catch(() => {});
-          }
-
-          adminReplyPromise = ctx.reply(
-            `✅ *مەھسۇلات سىستېمىغا ۋە بارلىق قاناللارغا مۇۋەپپەقىيەتلىك تارقىتىلدى!*\n\n` +
-            `✨ *نامى:* ${parsedProduct.nameUg}\n` +
-            `💰 *باھاسى:* ${currencySymbol}${parsedProduct.price}\n` +
-            `📁 *تۈرى:* ${parsedProduct.categoryId}\n\n` +
-            `🌐 [تور دۇكىنىدا كۆرۈش](https://noor-store.yulgun353.workers.dev/)\n` +
-            `✈️ [تېلېگرامدا كۆرۈش](https://t.me/NoorStore2) | 💬 [ۋاتساپ](https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4)`,
-            { 
-              parse_mode: 'Markdown',
-              reply_markup: directButtons
-            }
-          ).catch(e => console.log('[Admin Reply Notice]:', e.message));
-        }
-
-        // Wait for all concurrent tasks simultaneously
-        const [dbResult, _, waResult] = await Promise.all([dbPromise, tgChannelPromise, waPromise, adminReplyPromise]);
-
-        const logEntry = {
-          time: new Date().toLocaleTimeString(),
-          name: parsedProduct.nameUg,
-          price: parsedProduct.price,
-          category: parsedProduct.categoryId,
-          supabaseSuccess: dbResult?.success ?? true,
-          whatsappSuccess: waResult?.success ?? false,
-          whatsappGroup: waResult?.groupName || 'WhatsApp'
-        };
-        syncedLogs.unshift(logEntry);
-        if (syncedLogs.length > 30) syncedLogs.pop();
-
-      } catch (err) {
-        console.error('[Telegram Handler Error]:', err.message);
-      }
-    });
-
-    await telegramBot.start({
-      onStart: (botInfo) => {
-        telegramStatus = 'CONNECTED';
-        console.log(`[Telegram] ✅ Bot started successfully as @${botInfo.username}!`);
-      }
-    });
-
+    // Telegram Bot operates via Cloudflare Worker 24/7 Webhook
+    // Local daemon only handles WhatsApp socket and Supabase auto-sync
+    telegramStatus = 'CONNECTED';
+    console.log('[Telegram] ✅ Bot active 24/7 via Cloudflare Worker Webhook!');
   } catch (err) {
     telegramStatus = 'ERROR';
-    console.error('[Telegram] Failed to start bot:', err.message);
+    console.error('[Telegram] Initialization notice:', err.message);
   }
 }
 
@@ -366,41 +163,95 @@ async function syncWithCloudState() {
       };
       const res = await sendProductToWhatsApp(testProd, null);
       console.log('[Test WhatsApp Cloud Command Result]:', res);
+    } else if (cmd.command === 'BROADCAST_LATEST') {
+      console.log('[Cloud Command] 🚀 Broadcasting latest product to WhatsApp with all images...');
+      try {
+        const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false }).limit(1);
+        if (data && data.length > 0) {
+          const item = data[0];
+          const photoBuffers = [];
+          const imageUrls = [item.image_res_name, item.image_res_name2, item.image_res_name3].filter(Boolean);
+          for (const imgUrl of imageUrls) {
+            if (imgUrl && imgUrl.startsWith('http')) {
+              try {
+                const resp = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 8000 });
+                photoBuffers.push(Buffer.from(resp.data));
+              } catch(e) {}
+            }
+          }
+          const res = await sendProductToWhatsApp({
+            nameUg: item.name_ug,
+            price: item.price,
+            descriptionUg: item.description_ug
+          }, photoBuffers);
+          console.log('[Cloud Command BROADCAST_LATEST Result]:', res);
+        }
+      } catch (err) {
+        console.error('[Cloud Command BROADCAST_LATEST Error]:', err.message);
+      }
     }
   }
 }
 
-let lastKnownMaxProductId = 0;
+const seenProductIds = new Set();
+let isInitialSyncDone = false;
 
 async function checkAndBroadcastNewSupabaseProducts() {
   try {
-    const { data } = await supabase.from('products').select('*').order('id', { ascending: false }).limit(5);
+    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false }).limit(10);
     if (!data || data.length === 0) return;
-    
-    const currentMax = Math.max(...data.map(p => Number(p.id) || 0));
-    if (lastKnownMaxProductId === 0) {
-      lastKnownMaxProductId = currentMax;
+
+    if (!isInitialSyncDone) {
+      data.forEach(p => seenProductIds.add(String(p.id)));
+      isInitialSyncDone = true;
       return;
     }
 
-    if (currentMax > lastKnownMaxProductId) {
-      const newItems = data.filter(p => Number(p.id) > lastKnownMaxProductId);
-      lastKnownMaxProductId = currentMax;
-      
-      for (const item of newItems) {
-        console.log(`[Auto WhatsApp] 🚀 Broadcasting new product #${item.id} to WhatsApp: "${item.name_ug}" ($${item.price})`);
-        let photoBuffer = null;
-        if (item.image_res_name && item.image_res_name.startsWith('http')) {
-          try {
-            const resp = await axios.get(item.image_res_name, { responseType: 'arraybuffer' });
-            photoBuffer = Buffer.from(resp.data);
-          } catch(e) {}
+    for (const item of data) {
+      const idStr = String(item.id);
+      if (!seenProductIds.has(idStr)) {
+        seenProductIds.add(idStr);
+        console.log(`[SyncEngine] 📦 New product detected (${idStr}: "${item.name_ug}"). Waiting 4s for all album photos to settle in Supabase...`);
+        await new Promise(r => setTimeout(r, 4000));
+
+        // Re-fetch to ensure any late-settling sibling images (image_res_name2, image_res_name3) are included
+        let currentItem = item;
+        try {
+          const { data: freshData } = await supabase.from('products').select('*').eq('id', item.id).single();
+          if (freshData) currentItem = freshData;
+        } catch (e) {}
+
+        const photoBuffers = [];
+        const imageUrls = [currentItem.image_res_name, currentItem.image_res_name2, currentItem.image_res_name3].filter(Boolean);
+        for (const imgUrl of imageUrls) {
+          if (imgUrl && imgUrl.startsWith('http')) {
+            try {
+              const resp = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 8000 });
+              photoBuffers.push(Buffer.from(resp.data));
+            } catch(e) {}
+          }
         }
-        await sendProductToWhatsApp({
-          nameUg: item.name_ug,
-          price: item.price,
-          descriptionUg: item.description_ug
-        }, photoBuffer);
+        console.log(`[SyncEngine] 🚀 Broadcasting "${currentItem.name_ug}" with ${photoBuffers.length} photo(s) to WhatsApp...`);
+        const res = await sendProductToWhatsApp({
+          nameUg: currentItem.name_ug,
+          price: currentItem.price,
+          descriptionUg: currentItem.description_ug
+        }, photoBuffers);
+
+        if (res.success) {
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          syncedLogs.unshift({
+            time: timeStr,
+            name: currentItem.name_ug,
+            price: item.price,
+            supabaseSuccess: true,
+            whatsappSuccess: true,
+            whatsappGroup: res.groupName || 'Noor_Store'
+          });
+          if (syncedLogs.length > 20) syncedLogs = syncedLogs.slice(0, 20);
+          syncWithCloudState();
+        }
       }
     }
   } catch (err) {
@@ -409,7 +260,7 @@ async function checkAndBroadcastNewSupabaseProducts() {
 }
 
 setInterval(syncWithCloudState, 3000);
-setInterval(checkAndBroadcastNewSupabaseProducts, 4000);
+setInterval(checkAndBroadcastNewSupabaseProducts, 3000);
 
 // ==========================================
 // 3. WEB CONTROL DASHBOARD & REST API

@@ -7,8 +7,10 @@ import { CONFIG } from './config.js';
  * Distinguishes strictly between Storage/RAM/Battery numbers and actual Price!
  */
 
+export const parseProductMessage = parseProductWithAI;
+
 export async function parseProductWithAI(text = '') {
-  const cleanText = text.trim();
+  const cleanText = normalizeNumbers(text).trim();
   if (!cleanText) {
     return parseProductRuleBased('');
   }
@@ -83,9 +85,29 @@ ${cleanText}
   return parseProductRuleBased(cleanText);
 }
 
+export function normalizeNumbers(str) {
+  if (!str) return '';
+  const map = {
+    '0️⃣': '0', '1️⃣': '1', '2️⃣': '2', '3️⃣': '3', '4️⃣': '4',
+    '5️⃣': '5', '6️⃣': '6', '7️⃣': '7', '8️⃣': '8', '9️⃣': '9',
+    '0⃣': '0', '1⃣': '1', '2⃣': '2', '3⃣': '3', '4⃣': '4',
+    '5⃣': '5', '6⃣': '6', '7⃣': '7', '8⃣': '8', '9⃣': '9',
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
+  };
+  let res = str;
+  for (const [k, v] of Object.entries(map)) {
+    res = res.replaceAll(k, v);
+  }
+  return res;
+}
+
 export function parseProductRuleBased(text = '') {
-  const cleanText = text.trim();
-  if (!cleanText) {
+  const cleanText = text ? text.trim() : '';
+  const normalizedText = normalizeNumbers(cleanText).trim();
+  if (!normalizedText) {
     return {
       nameUg: 'يېڭى مەھسۇلات',
       nameAr: 'منتج جديد',
@@ -99,7 +121,7 @@ export function parseProductRuleBased(text = '') {
     };
   }
 
-  const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
+  const lines = normalizedText.split('\n').map(l => l.trim()).filter(Boolean);
 
   // 1. EXTRACT PRICE (STRICT PATTERNS EXCLUDING STORAGE / RAM)
   let price = 0;
@@ -112,9 +134,13 @@ export function parseProductRuleBased(text = '') {
   ];
 
   for (const regex of explicitPricePatterns) {
-    const match = cleanText.match(regex);
+    const match = normalizedText.match(regex);
     if (match && match[1]) {
-      const num = parseFloat(match[1]);
+      let rawNum = match[1];
+      if (rawNum.startsWith('0') && rawNum.length >= 2) {
+        rawNum = rawNum.split('').reverse().join('');
+      }
+      const num = parseFloat(rawNum);
       if (!isNaN(num) && num > 0) {
         price = num;
         break;
@@ -130,10 +156,13 @@ export function parseProductRuleBased(text = '') {
       if (/(?:ساقلغۇچ|ساقلىغۇچ|سىغىم|سىغىمى|رام|باتارېيە|كامېرا|ئاندرويىد|android|mah|gb|tb|mp|giga|ram|rom)/i.test(line)) {
         continue;
       }
-      const matches = line.match(/\b([1-9][0-9]{1,4})\b/g);
+      const matches = line.match(/\b([0-9]{1,5})\b/g);
       if (matches && matches.length > 0) {
-        // take the number
-        const val = parseFloat(matches[matches.length - 1]);
+        let rawNum = matches[matches.length - 1];
+        if (rawNum.startsWith('0') && rawNum.length >= 2) {
+          rawNum = rawNum.split('').reverse().join('');
+        }
+        const val = parseFloat(rawNum);
         if (val !== 64 && val !== 128 && val !== 256 && val !== 512 && val !== 1024) {
           price = val;
           break;
