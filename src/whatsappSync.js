@@ -4,6 +4,7 @@ import makeWASocket, {
   prepareWAMessageMedia, 
   generateWAMessageFromContent 
 } from '@whiskeysockets/baileys';
+import sharp from 'sharp';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'fs';
@@ -196,6 +197,67 @@ export async function refreshWhatsAppGroups() {
 }
 
 /**
+ * Stitches 2 or 3 photos side-by-side into a single high-resolution collage.
+ * Guarantees in WhatsApp that all photos appear in the exact same visual plane (بىر تەكشىلىكتە يانمۇ-يان)
+ * with the full text caption directly underneath!
+ */
+export async function createPhotoCollage(photoBuffers) {
+  if (!photoBuffers || photoBuffers.length === 0) return null;
+  if (photoBuffers.length === 1) return photoBuffers[0];
+
+  try {
+    const targetHeight = 850;
+    const validBuffers = photoBuffers.slice(0, 3).filter(Boolean);
+    if (validBuffers.length === 1) return validBuffers[0];
+
+    const resizedImages = await Promise.all(
+      validBuffers.map(async (buf) => {
+        const img = sharp(buf);
+        const meta = await img.metadata();
+        const width = Math.max(100, Math.round((meta.width / meta.height) * targetHeight));
+        const data = await img
+          .resize({ height: targetHeight })
+          .jpeg({ quality: 90 })
+          .toBuffer();
+        return { data, width, height: targetHeight };
+      })
+    );
+
+    const gap = 12; // 12px clean white divider between photos
+    const totalWidth = resizedImages.reduce((sum, img) => sum + img.width, 0) + (gap * (resizedImages.length - 1));
+
+    const compositeList = [];
+    let currentX = 0;
+    for (const img of resizedImages) {
+      compositeList.push({
+        input: img.data,
+        top: 0,
+        left: currentX
+      });
+      currentX += img.width + gap;
+    }
+
+    const collage = await sharp({
+      create: {
+        width: totalWidth,
+        height: targetHeight,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 }
+      }
+    })
+    .composite(compositeList)
+    .jpeg({ quality: 92 })
+    .toBuffer();
+
+    console.log(`[Collage Engine] 🎨 Generated side-by-side collage for ${validBuffers.length} photos (${totalWidth}x${targetHeight})!`);
+    return collage;
+  } catch (err) {
+    console.error('[Collage Engine Error]:', err.message);
+    return photoBuffers[0];
+  }
+}
+
+/**
  * Broadcasts a product announcement to the configured WhatsApp group
  */
 export async function sendProductToWhatsApp(productData, photoBuffers = []) {
@@ -248,48 +310,26 @@ https://chat.whatsapp.com/KFp89uoqOOfCj8ZLDXOlPy?s=sh&p=a&mlu=4`;
     const buffers = Array.isArray(photoBuffers) ? photoBuffers : (photoBuffers ? [photoBuffers] : []);
 
     if (buffers.length > 1) {
-      // Multi-photo Album:
-      // Pre-upload all photos in parallel and relay stanzas with 0 delay so WhatsApp
-      // groups them into an album collage side-by-side with text underneath.
-      try {
-        const mediaUploads = await Promise.all(
-          buffers.map(buf => prepareWAMessageMedia({ image: buf }, { upload: whatsappSocket.waUploadToServer }))
-        );
-
-        for (let i = 0; i < mediaUploads.length; i++) {
-          const content = mediaUploads[i];
-          if (i === 0) {
-            content.imageMessage.caption = caption;
-          }
-          const msg = generateWAMessageFromContent(targetJid, content, {
-            userJid: whatsappSocket.user?.id
-          });
-          await whatsappSocket.relayMessage(targetJid, msg.message, {
-            messageId: msg.key.id
-          });
-        }
-      } catch (albumErr) {
-        console.warn('[WhatsApp] Pre-upload album fallback:', albumErr.message);
-        // Fallback: send sequentially with 0 delay
-        for (let i = 0; i < buffers.length; i++) {
-          await whatsappSocket.sendMessage(targetJid, {
-            image: buffers[i],
-            ...(i === 0 ? { caption } : {})
-          });
-        }
-      }
+      // Option A: Stitch multi-photo album side-by-side into a single high-resolution collage
+      // so in WhatsApp all photos appear on the exact same plane with the text underneath!
+      const collageBuffer = await createPhotoCollage(buffers);
+      await whatsappSocket.sendMessage(targetJid, {
+        image: collageBuffer,
+        caption
+      });
+      console.log(`[WhatsApp] ✅ Broadcasted side-by-side collage (${buffers.length} photos) with caption to "${groupName}"!`);
     } else if (buffers.length === 1) {
       await whatsappSocket.sendMessage(targetJid, {
         image: buffers[0],
         caption
       });
+      console.log(`[WhatsApp] ✅ Broadcasted single photo with caption to "${groupName}"!`);
     } else {
       await whatsappSocket.sendMessage(targetJid, {
         text: caption
       });
     }
 
-    console.log(`[WhatsApp] ✅ Broadcasted ${buffers.length} photos to WhatsApp group: "${groupName}" (${targetJid})!`);
     return { success: true, groupName, groupId: targetJid };
   } catch (err) {
     console.error('[WhatsApp] Broadcast error:', err.message);
